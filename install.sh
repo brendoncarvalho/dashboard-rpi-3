@@ -58,8 +58,14 @@ echo "  Papel de Parede: $WALLPAPER_URL"
 echo "  Logo: $LOGO_URL (fixa)"
 echo ""
 
-ps "Salvando configuração..."
+ps "Criando diretórios..."
 mkdir -p "$INSTALL_DIR"
+mkdir -p "$SCRIPTS_DIR"
+mkdir -p "/opt/splash"
+mkdir -p "$USER_HOME/.config/lxsession/LXDE-pi"
+mkdir -p "$USER_HOME/Pictures"
+
+ps "Salvando configuração..."
 cat > "$INSTALL_DIR/config.sh" << EOF
 DASHBOARD_URL="$DASHBOARD_URL"
 WALLPAPER_URL="$WALLPAPER_URL"
@@ -70,19 +76,29 @@ SPLASH_DIR="/opt/splash"
 EOF
 chmod 644 "$INSTALL_DIR/config.sh"
 
-mkdir -p "$SCRIPTS_DIR" "$USER_HOME/terminal_scripts" "/opt/splash"
-
 ps "Atualizando sistema..."
-apt-get update > /dev/null 2>&1
-apt-get upgrade -y > /dev/null 2>&1
+apt-get update -qq
+apt-get upgrade -y -qq
 
 ps "Instalando dependências..."
-apt-get install -y xrdp chromium-browser unclutter wget curl feh pcmanfm fbi psplash imagemagick > /dev/null 2>&1
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    xrdp \
+    chromium-browser \
+    unclutter \
+    wget \
+    curl \
+    feh \
+    pcmanfm \
+    fbi \
+    psplash \
+    imagemagick \
+    lxsession \
+    lxde-core
 
 ps "Configurando XRDP..."
-systemctl enable xrdp > /dev/null 2>&1
-systemctl start xrdp > /dev/null 2>&1
-adduser $CURRENT_USER ssl-cert 2>/dev/null || true
+systemctl enable xrdp 2>/dev/null || true
+systemctl start xrdp 2>/dev/null || true
+usermod -aG ssl-cert $CURRENT_USER 2>/dev/null || true
 
 ps "Criando scripts..."
 cat > "$SCRIPTS_DIR/update_wallpaper.sh" << 'WALLPAPER'
@@ -91,13 +107,20 @@ cat > "$SCRIPTS_DIR/update_wallpaper.sh" << 'WALLPAPER'
 WALLPAPER_PATH="$HOME/Pictures/wallpaper.png"
 mkdir -p "$HOME/Pictures"
 wget -q -O "$WALLPAPER_PATH" "$WALLPAPER_URL" 2>/dev/null || curl -s -o "$WALLPAPER_PATH" "$WALLPAPER_URL" 2>/dev/null
-[ -f "$WALLPAPER_PATH" ] && pcmanfm --set-wallpaper="$WALLPAPER_PATH" --wallpaper-mode=stretch 2>/dev/null
+if [ -f "$WALLPAPER_PATH" ]; then
+    DISPLAY=:0 pcmanfm --set-wallpaper="$WALLPAPER_PATH" --wallpaper-mode=stretch 2>/dev/null || true
+fi
 WALLPAPER
 
 cat > "$SCRIPTS_DIR/show_splash.sh" << 'SPLASH'
 #!/bin/bash
 SPLASH_IMAGE="/opt/splash/splash.png"
-[ -f "$SPLASH_IMAGE" ] && { fbi -T 1 -noverbose -a "$SPLASH_IMAGE" 2>/dev/null & FBI_PID=$!; sleep 5; kill $FBI_PID 2>/dev/null; }
+if [ -f "$SPLASH_IMAGE" ]; then
+    DISPLAY=:0 fbi -T 1 -noverbose -a "$SPLASH_IMAGE" 2>/dev/null &
+    FBI_PID=$!
+    sleep 5
+    kill $FBI_PID 2>/dev/null || true
+fi
 SPLASH
 
 chmod +x "$SCRIPTS_DIR/update_wallpaper.sh" "$SCRIPTS_DIR/show_splash.sh"
@@ -106,16 +129,16 @@ ps "Baixando logo..."
 wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null || curl -s -o "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
 if [ -f "/opt/splash/logo.png" ]; then
     ps "Redimensionando logo..."
-    convert "/opt/splash/logo.png" -resize 320x240 -background white -gravity center -extent 320x240 "/opt/splash/splash.png" > /dev/null 2>&1
+    convert "/opt/splash/logo.png" -resize 320x240 -background white -gravity center -extent 320x240 "/opt/splash/splash.png" 2>/dev/null || true
 fi
 
 ps "Configurando autostart..."
-mkdir -p "$USER_HOME/.config/lxsession/LXDE-pi/"
 cat > "$USER_HOME/.config/lxsession/LXDE-pi/autostart" << AUTOSTART
 @lxpanel --profile LXDE-pi
 @pcmanfm --desktop --profile LXDE-pi
 @xscreensaver -no-splash
 @/opt/terminal/scripts/show_splash.sh
+@sleep 6
 @/opt/terminal/scripts/update_wallpaper.sh
 @xset s off
 @xset s noblank
@@ -123,10 +146,17 @@ cat > "$USER_HOME/.config/lxsession/LXDE-pi/autostart" << AUTOSTART
 @unclutter -idle 5 -root
 @chromium-browser --kiosk --noerrdialogs --disable-infobars --check-for-update-interval=31536000 "$DASHBOARD_URL"
 AUTOSTART
-chown $CURRENT_USER:$CURRENT_USER "$USER_HOME/.config/lxsession/LXDE-pi/autostart"
+
+chown -R $CURRENT_USER:$CURRENT_USER "$USER_HOME/.config"
+chmod 644 "$USER_HOME/.config/lxsession/LXDE-pi/autostart"
 
 ps "Otimizando boot..."
-grep -q "quiet splash" /boot/cmdline.txt || { cp /boot/cmdline.txt /boot/cmdline.txt.bak; sed -i '$ s/$/ quiet splash loglevel=3 logo.nologo vt.global_cursor_default=0/' /boot/cmdline.txt; }
+if [ -f /boot/cmdline.txt ]; then
+    if ! grep -q "quiet splash" /boot/cmdline.txt; then
+        cp /boot/cmdline.txt /boot/cmdline.txt.bak
+        sed -i '$ s/$/ quiet splash loglevel=3 logo.nologo vt.global_cursor_default=0/' /boot/cmdline.txt || true
+    fi
+fi
 
 ps "Criando scripts auxiliares..."
 cat > "$INSTALL_DIR/update.sh" << 'UPDATE'
@@ -135,13 +165,15 @@ source /opt/terminal/config.sh
 echo "Atualizando..."
 /opt/terminal/scripts/update_wallpaper.sh
 wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null || curl -s -o "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
-[ -f "/opt/splash/logo.png" ] && convert "/opt/splash/logo.png" -resize 320x240 -background white -gravity center -extent 320x240 "/opt/splash/splash.png" > /dev/null 2>&1
+if [ -f "/opt/splash/logo.png" ]; then
+    convert "/opt/splash/logo.png" -resize 320x240 -background white -gravity center -extent 320x240 "/opt/splash/splash.png" 2>/dev/null || true
+fi
 echo "Concluído!"
 UPDATE
 
 cat > "$INSTALL_DIR/diagnose.sh" << 'DIAGNOSE'
 #!/bin/bash
-source /opt/terminal/config.sh
+source /opt/terminal/config.sh 2>/dev/null || true
 echo ""
 echo "╔════════════════════════════════════════════════════════╗"
 echo "║   Diagnóstico - Terminal Inteligente                  ║"
@@ -159,10 +191,12 @@ echo ""
 echo ""
 ping -c 1 8.8.8.8 &>/dev/null && echo "✓ Internet conectada" || echo "✗ Sem internet"
 echo ""
-echo "URLs Configuradas:"
-echo "  Dashboard: $DASHBOARD_URL"
-echo "  Papel de Parede: $WALLPAPER_URL"
-echo "  Logo: $LOGO_URL"
+[ -f /opt/terminal/config.sh ] && {
+    echo "URLs Configuradas:"
+    echo "  Dashboard: $(grep DASHBOARD_URL /opt/terminal/config.sh | cut -d'"' -f2)"
+    echo "  Papel de Parede: $(grep WALLPAPER_URL /opt/terminal/config.sh | cut -d'"' -f2)"
+    echo "  Logo: $(grep LOGO_URL /opt/terminal/config.sh | cut -d'"' -f2)"
+}
 echo ""
 DIAGNOSE
 
@@ -170,8 +204,8 @@ cat > "$INSTALL_DIR/uninstall.sh" << 'UNINSTALL'
 #!/bin/bash
 echo "Desinstalando..."
 rm -rf /opt/terminal /opt/splash
-systemctl stop xrdp
-systemctl disable xrdp
+systemctl stop xrdp 2>/dev/null || true
+systemctl disable xrdp 2>/dev/null || true
 echo "Concluído!"
 UNINSTALL
 
