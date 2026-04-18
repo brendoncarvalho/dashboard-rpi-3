@@ -152,7 +152,7 @@ adduser $CURRENT_USER ssl-cert 2>/dev/null || true
 # Baixar scripts do repositório
 print_status "Baixando scripts do repositório..."
 
-REPO_RAW="https://raw.githubusercontent.com/seu-usuario/terminal-inteligente/main"
+REPO_RAW="https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master"
 
 wget -q -O "$SCRIPTS_DIR/update_wallpaper.sh" "$REPO_RAW/scripts/update_wallpaper.sh"
 chmod +x "$SCRIPTS_DIR/update_wallpaper.sh"
