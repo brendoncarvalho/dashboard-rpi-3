@@ -83,17 +83,17 @@ apt-get upgrade -y -qq
 ps "Instalando dependências..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     xrdp \
-    chromium-browser \
+    chromium \
     unclutter \
     wget \
     curl \
     feh \
     pcmanfm \
     fbi \
-    psplash \
     imagemagick \
     lxsession \
-    lxde-core
+    lxde-core \
+    x11-xserver-utils || true
 
 ps "Configurando XRDP..."
 systemctl enable xrdp 2>/dev/null || true
@@ -144,7 +144,7 @@ cat > "$USER_HOME/.config/lxsession/LXDE-pi/autostart" << AUTOSTART
 @xset s noblank
 @xset -dpms
 @unclutter -idle 5 -root
-@chromium-browser --kiosk --noerrdialogs --disable-infobars --check-for-update-interval=31536000 "$DASHBOARD_URL"
+@chromium --kiosk --noerrdialogs --disable-infobars --check-for-update-interval=31536000 "$DASHBOARD_URL"
 AUTOSTART
 
 chown -R $CURRENT_USER:$CURRENT_USER "$USER_HOME/.config"
@@ -181,7 +181,7 @@ echo "╚═══════════════════════�
 echo ""
 systemctl is-active --quiet xrdp && echo "✓ XRDP rodando" || echo "✗ XRDP não rodando"
 echo ""
-command -v chromium-browser &>/dev/null && echo "✓ Chromium instalado" || echo "✗ Chromium não instalado"
+command -v chromium &>/dev/null && echo "✓ Chromium instalado" || echo "✗ Chromium não instalado"
 echo ""
 [ -f "/opt/splash/logo.png" ] && echo "✓ Logo encontrada" || echo "✗ Logo não encontrada"
 echo ""
