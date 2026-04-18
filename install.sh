@@ -10,9 +10,8 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Função para imprimir com cor
 print_status() {
     echo -e "${GREEN}[✓]${NC} $1"
 }
@@ -49,11 +48,11 @@ SCRIPTS_DIR="$INSTALL_DIR/scripts"
 USER_HOME="/home/$(logname)"
 CURRENT_USER=$(logname)
 
-# Parâmetros de entrada (com valores padrão vazios)
+# Parâmetros de entrada
 DASHBOARD_URL="${1:-}"
 WALLPAPER_URL="${2:-}"
 
-# Logo fixa (não customizável)
+# Logo fixa
 LOGO_URL="https://app.brendon.com.br/logo.png"
 
 # Função para validar URL
@@ -71,7 +70,7 @@ print_info "Configuração de URLs"
 echo ""
 
 if [ -z "$DASHBOARD_URL" ]; then
-    echo -e "${YELLOW}Digite a URL do Dashboard (ex: https://app.example.com/dashboard):${NC}"
+    echo -e "${YELLOW}Digite a URL do Dashboard (ex: https://app.example.com):${NC}"
     read -p "> " DASHBOARD_URL
     while ! validate_url "$DASHBOARD_URL"; do
         print_error "URL inválida. Deve começar com http:// ou https://"
@@ -87,8 +86,6 @@ if [ -z "$WALLPAPER_URL" ]; then
         read -p "> " WALLPAPER_URL
     done
 fi
-
-
 
 echo ""
 print_status "Configuração de URLs:"
@@ -149,20 +146,49 @@ systemctl enable xrdp > /dev/null 2>&1
 systemctl start xrdp > /dev/null 2>&1
 adduser $CURRENT_USER ssl-cert 2>/dev/null || true
 
-# Baixar scripts do repositório
-print_status "Baixando scripts do repositório..."
+# Criar scripts inline (sem depender de downloads)
+print_status "Criando scripts de automação..."
 
-REPO_RAW="https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master"
+# Script de papel de parede
+cat > "$SCRIPTS_DIR/update_wallpaper.sh" << 'WALLPAPER_SCRIPT'
+#!/bin/bash
+if [ -f "/opt/terminal/config.sh" ]; then
+    source /opt/terminal/config.sh
+else
+    exit 1
+fi
 
-wget -q -O "$SCRIPTS_DIR/update_wallpaper.sh" "$REPO_RAW/scripts/update_wallpaper.sh"
+WALLPAPER_PATH="$HOME/Pictures/wallpaper.png"
+mkdir -p "$HOME/Pictures"
+
+wget -q -O "$WALLPAPER_PATH" "$WALLPAPER_URL" 2>/dev/null || \
+curl -s -o "$WALLPAPER_PATH" "$WALLPAPER_URL" 2>/dev/null
+
+if [ -f "$WALLPAPER_PATH" ]; then
+    pcmanfm --set-wallpaper="$WALLPAPER_PATH" --wallpaper-mode=stretch 2>/dev/null
+fi
+WALLPAPER_SCRIPT
+
 chmod +x "$SCRIPTS_DIR/update_wallpaper.sh"
 
-wget -q -O "$SCRIPTS_DIR/show_splash.sh" "$REPO_RAW/scripts/show_splash.sh"
+# Script de splash screen
+cat > "$SCRIPTS_DIR/show_splash.sh" << 'SPLASH_SCRIPT'
+#!/bin/bash
+SPLASH_IMAGE="/opt/splash/splash.png"
+if [ -f "$SPLASH_IMAGE" ]; then
+    fbi -T 1 -noverbose -a "$SPLASH_IMAGE" 2>/dev/null &
+    FBI_PID=$!
+    sleep 5
+    kill $FBI_PID 2>/dev/null
+fi
+SPLASH_SCRIPT
+
 chmod +x "$SCRIPTS_DIR/show_splash.sh"
 
 # Baixar logo
 print_status "Baixando logo personalizada..."
-wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
+wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null || \
+curl -s -o "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
 
 if [ -f "/opt/splash/logo.png" ]; then
     print_status "Redimensionando logo para splash screen..."
@@ -175,13 +201,13 @@ fi
 print_status "Configurando autostart (Kiosk Mode)..."
 mkdir -p "$USER_HOME/.config/lxsession/LXDE-pi/"
 
-cat > "$USER_HOME/.config/lxsession/LXDE-pi/autostart" << 'AUTOSTART_EOF'
+cat > "$USER_HOME/.config/lxsession/LXDE-pi/autostart" << AUTOSTART_EOF
 @lxpanel --profile LXDE-pi
 @pcmanfm --desktop --profile LXDE-pi
 @xscreensaver -no-splash
 
 # Mostrar splash screen com logo
-@/opt/splash/show_splash.sh
+@/opt/terminal/scripts/show_splash.sh
 
 # Atualizar papel de parede
 @/opt/terminal/scripts/update_wallpaper.sh
@@ -195,11 +221,8 @@ cat > "$USER_HOME/.config/lxsession/LXDE-pi/autostart" << 'AUTOSTART_EOF'
 @unclutter -idle 5 -root
 
 # Iniciar Chromium em modo Kiosk
-@chromium-browser --kiosk --noerrdialogs --disable-infobars --check-for-update-interval=31536000 "DASHBOARD_URL_PLACEHOLDER"
+@chromium-browser --kiosk --noerrdialogs --disable-infobars --check-for-update-interval=31536000 "$DASHBOARD_URL"
 AUTOSTART_EOF
-
-# Substituir placeholder pela URL real
-sed -i "s|DASHBOARD_URL_PLACEHOLDER|$DASHBOARD_URL|g" "$USER_HOME/.config/lxsession/LXDE-pi/autostart"
 
 chown $CURRENT_USER:$CURRENT_USER "$USER_HOME/.config/lxsession/LXDE-pi/autostart"
 
@@ -218,13 +241,13 @@ source /opt/terminal/config.sh
 
 echo "Atualizando configuração do terminal..."
 
-# Atualizar papel de parede
 echo "Atualizando papel de parede..."
 /opt/terminal/scripts/update_wallpaper.sh
 
-# Atualizar logo
 echo "Atualizando logo..."
-wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
+wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null || \
+curl -s -o "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
+
 if [ -f "/opt/splash/logo.png" ]; then
     convert "/opt/splash/logo.png" -resize 320x240 -background white -gravity center -extent 320x240 "/opt/splash/splash.png" > /dev/null 2>&1
 fi
