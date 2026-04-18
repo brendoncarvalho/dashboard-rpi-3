@@ -100,6 +100,19 @@ systemctl enable xrdp 2>/dev/null || true
 systemctl start xrdp 2>/dev/null || true
 usermod -aG ssl-cert $CURRENT_USER 2>/dev/null || true
 
+ps "Configurando auto login..."
+raspi-config nonint do_boot_behaviour B2 2>/dev/null || true
+if [ -f /etc/lxdm/lxdm.conf ]; then
+    sed -i "s/^# session=.*/session=LXDE-pi/" /etc/lxdm/lxdm.conf
+    sed -i "s/^# login_user=.*/login_user=$CURRENT_USER/" /etc/lxdm/lxdm.conf
+fi
+if [ -f /etc/lightdm/lightdm.conf ]; then
+    sed -i "s/^#autologin-user=.*/autologin-user=$CURRENT_USER/" /etc/lightdm/lightdm.conf
+    sed -i "s/^#autologin-user-timeout=.*/autologin-user-timeout=0/" /etc/lightdm/lightdm.conf
+fi
+usermod -aG video $CURRENT_USER 2>/dev/null || true
+usermod -aG input $CURRENT_USER 2>/dev/null || true
+
 ps "Criando scripts..."
 cat > "$SCRIPTS_DIR/update_wallpaper.sh" << 'WALLPAPER'
 #!/bin/bash
@@ -128,8 +141,11 @@ chmod +x "$SCRIPTS_DIR/update_wallpaper.sh" "$SCRIPTS_DIR/show_splash.sh"
 ps "Baixando logo..."
 wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null || curl -s -o "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
 if [ -f "/opt/splash/logo.png" ]; then
-    ps "Redimensionando logo..."
-    convert "/opt/splash/logo.png" -resize 320x240 -background white -gravity center -extent 320x240 "/opt/splash/splash.png" 2>/dev/null || true
+    ps "Redimensionando logo para splash screen..."
+    SPLASH_PATH="/usr/share/plymouth/themes/pix/splash.png"
+    mkdir -p "$(dirname "$SPLASH_PATH")"
+    cp "/opt/splash/logo.png" "$SPLASH_PATH"
+    convert "$SPLASH_PATH" -resize 1024x768 -background white -gravity center -extent 1024x768 "$SPLASH_PATH" 2>/dev/null || true
 fi
 
 ps "Configurando autostart..."
@@ -166,7 +182,9 @@ echo "Atualizando..."
 /opt/terminal/scripts/update_wallpaper.sh
 wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null || curl -s -o "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
 if [ -f "/opt/splash/logo.png" ]; then
-    convert "/opt/splash/logo.png" -resize 320x240 -background white -gravity center -extent 320x240 "/opt/splash/splash.png" 2>/dev/null || true
+    SPLASH_PATH="/usr/share/plymouth/themes/pix/splash.png"
+    cp "/opt/splash/logo.png" "$SPLASH_PATH"
+    convert "$SPLASH_PATH" -resize 1024x768 -background white -gravity center -extent 1024x768 "$SPLASH_PATH" 2>/dev/null || true
 fi
 echo "Concluído!"
 UPDATE
