@@ -1,0 +1,33 @@
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Imagens de disco
+*.img
+*.iso
+
+# Backups
+*.bak
+*.backup
+
+# Arquivos temporários
+tmp/
+temp/
+.tmp/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
