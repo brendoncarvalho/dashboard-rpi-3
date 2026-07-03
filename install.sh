@@ -12,9 +12,17 @@ pi() { echo -e "${YELLOW}[i]${NC} $1"; }
 pe() { echo -e "${RED}[✗]${NC} $1"; }
 ph() { echo -e "${BLUE}$1${NC}"; }
 
-# Registra toda a saída em log para facilitar diagnóstico em máquinas headless
+# Registra toda a saída em log para facilitar diagnóstico em máquinas headless.
+# Usa FIFO em vez de process substitution (> >(...)), que depende de /dev/fd e
+# falha em alguns ambientes (ex.: "bash: /dev/fd/63: No such file or directory").
+# Se qualquer etapa falhar, o script segue sem log em vez de abortar.
 LOG_FILE="/var/log/terminal-install.log"
-exec > >(tee -a "$LOG_FILE") 2>&1
+_LOG_PIPE=$(mktemp -u 2>/dev/null || echo "/tmp/terminal-install.$$.pipe")
+if mkfifo "$_LOG_PIPE" 2>/dev/null; then
+    tee -a "$LOG_FILE" < "$_LOG_PIPE" &
+    exec > "$_LOG_PIPE" 2>&1
+    rm -f "$_LOG_PIPE" 2>/dev/null || true
+fi
 
 echo ""
 ph "╔════════════════════════════════════════════════════════╗"
