@@ -1,0 +1,7 @@
+# Garante quebras de linha LF para scripts que rodam em Linux (Raspberry Pi),
+# mesmo com core.autocrlf=true em máquinas Windows.
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# Normaliza texto por padrão, deixando o Git decidir o EOL nos demais arquivos.
+*       text=auto

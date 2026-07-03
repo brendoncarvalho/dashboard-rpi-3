@@ -12,6 +12,10 @@ pi() { echo -e "${YELLOW}[i]${NC} $1"; }
 pe() { echo -e "${RED}[✗]${NC} $1"; }
 ph() { echo -e "${BLUE}$1${NC}"; }
 
+# Registra toda a saída em log para facilitar diagnóstico em máquinas headless
+LOG_FILE="/var/log/terminal-install.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 echo ""
 ph "╔════════════════════════════════════════════════════════╗"
 ph "║        Instalação - Terminal Inteligente              ║"
@@ -20,35 +24,59 @@ echo ""
 
 [ "$EUID" -eq 0 ] || { pe "Execute com sudo"; exit 1; }
 
+# Detecta o usuário alvo de forma robusta (SUDO_USER > logname) e valida
+CURRENT_USER="${SUDO_USER:-$(logname 2>/dev/null || true)}"
+if [ -z "$CURRENT_USER" ] || [ "$CURRENT_USER" = "root" ]; then
+    pe "Não foi possível determinar o usuário alvo. Rode com 'sudo' a partir de uma sessão de usuário comum."
+    exit 1
+fi
+
+# Descobre o home real do usuário em vez de assumir /home/<user>
+USER_HOME=$(getent passwd "$CURRENT_USER" | cut -d: -f6)
+if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
+    pe "Diretório home do usuário '$CURRENT_USER' não encontrado."
+    exit 1
+fi
+
 INSTALL_DIR="/opt/terminal"
 SCRIPTS_DIR="$INSTALL_DIR/scripts"
-USER_HOME="/home/$(logname)"
-CURRENT_USER=$(logname)
+LOGO_URL="https://app.brendon.com.br/logo.png"
 DASHBOARD_URL="${1:-}"
 WALLPAPER_URL="${2:-}"
-LOGO_URL="https://app.brendon.com.br/logo.png"
 
-validate_url() { [[ $1 =~ ^https?:// ]]; }
+# Aceita apenas URLs http(s) sem caracteres que permitam injeção ao gravar/parsear o config
+validate_url() { [[ $1 =~ ^https?://[A-Za-z0-9._~:/?#@!\$\&\'\(\)\*+,\;=%-]+$ ]]; }
+
+# Lê uma URL do usuário; exige terminal interativo, senão orienta a passar por argumento
+prompt_url() {
+    local prompt_msg="$1" varname="$2" value
+    if [ ! -t 0 ]; then
+        pe "$prompt_msg não informada e sem terminal interativo."
+        pe "Use: sudo ./install.sh <URL_DASHBOARD> <URL_PAPEL_DE_PAREDE>"
+        exit 1
+    fi
+    echo -e "${YELLOW}${prompt_msg}:${NC}"
+    read -p "> " value
+    while ! validate_url "$value"; do
+        pe "URL inválida"
+        read -p "> " value
+    done
+    printf -v "$varname" '%s' "$value"
+}
 
 pi "Configuração de URLs"
 echo ""
 
 if [ -z "$DASHBOARD_URL" ]; then
-    echo -e "${YELLOW}Digite a URL do Dashboard:${NC}"
-    read -p "> " DASHBOARD_URL
-    while ! validate_url "$DASHBOARD_URL"; do
-        pe "URL inválida"
-        read -p "> " DASHBOARD_URL
-    done
+    prompt_url "Digite a URL do Dashboard" DASHBOARD_URL
+elif ! validate_url "$DASHBOARD_URL"; then
+    pe "URL do Dashboard inválida: $DASHBOARD_URL"; exit 1
 fi
 
 if [ -z "$WALLPAPER_URL" ]; then
-    echo -e "${YELLOW}Digite a URL do papel de parede:${NC}"
-    read -p "> " WALLPAPER_URL
-    while ! validate_url "$WALLPAPER_URL"; do
-        pe "URL inválida"
-        read -p "> " WALLPAPER_URL
-    done
+    prompt_url "Digite a URL do papel de parede" WALLPAPER_URL
+elif ! validate_url "$WALLPAPER_URL"; then
+    pe "URL do papel de parede inválida: $WALLPAPER_URL"; exit 1
 fi
 
 echo ""
@@ -77,8 +105,8 @@ EOF
 chmod 644 "$INSTALL_DIR/config.sh"
 
 ps "Atualizando sistema..."
-apt-get update -qq
-apt-get upgrade -y -qq
+apt-get update -qq || pi "Falha ao atualizar índices de pacotes (seguindo mesmo assim)"
+apt-get upgrade -y -qq || pi "Falha ao atualizar pacotes (seguindo mesmo assim)"
 
 ps "Instalando dependências..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
@@ -93,15 +121,23 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     imagemagick \
     lxsession \
     lxde-core \
-    x11-xserver-utils || true
+    plymouth \
+    plymouth-themes \
+    x11-xserver-utils || pi "Alguns pacotes podem não ter sido instalados; verificando os críticos..."
+
+# Aborta se um pacote essencial não estiver disponível, em vez de falhar só no boot
+for cmd in chromium wget convert; do
+    command -v "$cmd" >/dev/null 2>&1 || { pe "Dependência crítica ausente: $cmd. Corrija e rode novamente."; exit 1; }
+done
 
 ps "Configurando XRDP..."
 systemctl enable xrdp 2>/dev/null || true
 systemctl start xrdp 2>/dev/null || true
-usermod -aG ssl-cert $CURRENT_USER 2>/dev/null || true
+usermod -aG ssl-cert "$CURRENT_USER" 2>/dev/null || true
 
 ps "Configurando auto login..."
-raspi-config nonint do_boot_behaviour B2 2>/dev/null || true
+# B4 = Desktop Autologin (necessário para o ambiente gráfico e o kiosk subirem sozinhos)
+raspi-config nonint do_boot_behaviour B4 2>/dev/null || true
 if [ -f /etc/lxdm/lxdm.conf ]; then
     sed -i "s/^# session=.*/session=LXDE-pi/" /etc/lxdm/lxdm.conf
     sed -i "s/^# login_user=.*/login_user=$CURRENT_USER/" /etc/lxdm/lxdm.conf
@@ -110,8 +146,8 @@ if [ -f /etc/lightdm/lightdm.conf ]; then
     sed -i "s/^#autologin-user=.*/autologin-user=$CURRENT_USER/" /etc/lightdm/lightdm.conf
     sed -i "s/^#autologin-user-timeout=.*/autologin-user-timeout=0/" /etc/lightdm/lightdm.conf
 fi
-usermod -aG video $CURRENT_USER 2>/dev/null || true
-usermod -aG input $CURRENT_USER 2>/dev/null || true
+usermod -aG video "$CURRENT_USER" 2>/dev/null || true
+usermod -aG input "$CURRENT_USER" 2>/dev/null || true
 
 ps "Criando scripts..."
 cat > "$SCRIPTS_DIR/update_wallpaper.sh" << 'WALLPAPER'
@@ -125,6 +161,20 @@ if [ -f "$WALLPAPER_PATH" ]; then
 fi
 WALLPAPER
 
+# Script único para baixar/redimensionar a logo, reutilizado pela instalação e pelo update (DRY)
+cat > "$SCRIPTS_DIR/update_logo.sh" << 'LOGO'
+#!/bin/bash
+[ -f "/opt/terminal/config.sh" ] && source /opt/terminal/config.sh || exit 1
+LOGO_PATH="$SPLASH_DIR/logo.png"
+wget -q -O "$LOGO_PATH" "$LOGO_URL" 2>/dev/null || curl -s -o "$LOGO_PATH" "$LOGO_URL" 2>/dev/null
+if [ -f "$LOGO_PATH" ]; then
+    SPLASH_PATH="/usr/share/plymouth/themes/pix/splash.png"
+    mkdir -p "$(dirname "$SPLASH_PATH")"
+    cp "$LOGO_PATH" "$SPLASH_PATH"
+    convert "$SPLASH_PATH" -resize 1024x768 -background white -gravity center -extent 1024x768 "$SPLASH_PATH" 2>/dev/null || true
+fi
+LOGO
+
 cat > "$SCRIPTS_DIR/show_splash.sh" << 'SPLASH'
 #!/bin/bash
 SPLASH_IMAGE="/opt/splash/splash.png"
@@ -136,17 +186,13 @@ if [ -f "$SPLASH_IMAGE" ]; then
 fi
 SPLASH
 
-chmod +x "$SCRIPTS_DIR/update_wallpaper.sh" "$SCRIPTS_DIR/show_splash.sh"
+chmod +x "$SCRIPTS_DIR/update_wallpaper.sh" "$SCRIPTS_DIR/update_logo.sh" "$SCRIPTS_DIR/show_splash.sh"
 
-ps "Baixando logo..."
-wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null || curl -s -o "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
-if [ -f "/opt/splash/logo.png" ]; then
-    ps "Redimensionando logo para splash screen..."
-    SPLASH_PATH="/usr/share/plymouth/themes/pix/splash.png"
-    mkdir -p "$(dirname "$SPLASH_PATH")"
-    cp "/opt/splash/logo.png" "$SPLASH_PATH"
-    convert "$SPLASH_PATH" -resize 1024x768 -background white -gravity center -extent 1024x768 "$SPLASH_PATH" 2>/dev/null || true
-fi
+ps "Baixando logo e configurando splash..."
+"$SCRIPTS_DIR/update_logo.sh" || pi "Não foi possível baixar/processar a logo agora"
+# Aplica o tema de splash do Plymouth (sem isto a splash não aparece)
+plymouth-set-default-theme pix 2>/dev/null || true
+update-initramfs -u 2>/dev/null || true
 
 ps "Configurando autostart..."
 cat > "$USER_HOME/.config/lxsession/LXDE-pi/autostart" << AUTOSTART
@@ -160,19 +206,22 @@ cat > "$USER_HOME/.config/lxsession/LXDE-pi/autostart" << AUTOSTART
 @xset s noblank
 @xset -dpms
 @unclutter -idle 5 -root
-@chromium --kiosk --noerrdialogs --disable-infobars --check-for-update-interval=31536000 "$DASHBOARD_URL"
+@chromium --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-features=TranslateUI --check-for-update-interval=31536000 "$DASHBOARD_URL"
 AUTOSTART
 
-chown -R $CURRENT_USER:$CURRENT_USER "$USER_HOME/.config"
+chown -R "$CURRENT_USER:$CURRENT_USER" "$USER_HOME/.config"
 chmod 644 "$USER_HOME/.config/lxsession/LXDE-pi/autostart"
 
 ps "Otimizando boot..."
-if [ -f /boot/cmdline.txt ]; then
-    if ! grep -q "quiet splash" /boot/cmdline.txt; then
-        cp /boot/cmdline.txt /boot/cmdline.txt.bak
-        sed -i '$ s/$/ quiet splash loglevel=3 logo.nologo vt.global_cursor_default=0/' /boot/cmdline.txt || true
+# O caminho do cmdline mudou no Raspberry Pi OS Bookworm (/boot/firmware); trata os dois
+for CMDLINE in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+    [ -f "$CMDLINE" ] || continue
+    if ! grep -q "logo.nologo" "$CMDLINE"; then
+        cp "$CMDLINE" "$CMDLINE.bak"
+        sed -i '$ s/$/ quiet splash loglevel=3 logo.nologo vt.global_cursor_default=0/' "$CMDLINE" || true
     fi
-fi
+    break
+done
 
 ps "Criando scripts auxiliares..."
 cat > "$INSTALL_DIR/update.sh" << 'UPDATE'
@@ -180,12 +229,7 @@ cat > "$INSTALL_DIR/update.sh" << 'UPDATE'
 source /opt/terminal/config.sh
 echo "Atualizando..."
 /opt/terminal/scripts/update_wallpaper.sh
-wget -q -O "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null || curl -s -o "/opt/splash/logo.png" "$LOGO_URL" 2>/dev/null
-if [ -f "/opt/splash/logo.png" ]; then
-    SPLASH_PATH="/usr/share/plymouth/themes/pix/splash.png"
-    cp "/opt/splash/logo.png" "$SPLASH_PATH"
-    convert "$SPLASH_PATH" -resize 1024x768 -background white -gravity center -extent 1024x768 "$SPLASH_PATH" 2>/dev/null || true
-fi
+/opt/terminal/scripts/update_logo.sh
 echo "Concluído!"
 UPDATE
 
