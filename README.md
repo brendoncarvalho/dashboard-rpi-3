@@ -21,13 +21,24 @@ Solução automatizada para implantação de terminais Raspberry Pi 3 com acesso
 Execute um único comando no Raspberry Pi 3 com Raspberry Pi OS instalado:
 
 ```bash
-sudo bash <(curl -sSL https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master/install.sh)
+curl -sSL -o /tmp/install.sh https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master/install.sh && sudo bash /tmp/install.sh
 ```
 
 O script solicitará as URLs de configuração durante a instalação:
 - **URL do Dashboard** - Aplicação que será exibida em modo Kiosk
 - **URL do Papel de Parede** - Imagem que será aplicada como fundo
 - **Logo** - Imagem fixa que será exibida no splash screen (configurada no repositório)
+
+> **Por que não usar `sudo bash <(curl ...)`?** O `<(...)` cria um descritor
+> (`/dev/fd/63`) do seu shell não-root que o `sudo` não herda, causando o erro
+> `bash: /dev/fd/63: No such file or directory`. Baixar e executar evita isso.
+
+Para instalação **não-interativa** (sem prompts), passe as URLs como argumentos:
+
+```bash
+curl -sSL -o /tmp/install.sh https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master/install.sh && \
+  sudo bash /tmp/install.sh "https://seu-dashboard.com" "https://seu-servidor.com/wallpaper.png"
+```
 
 Pronto! Tudo será instalado e configurado automaticamente.
 
@@ -137,7 +148,7 @@ Pronto! Tudo será instalado e configurado automaticamente.
 
 3. **Execute o Script de Instalação**
    ```bash
-   sudo bash <(curl -sSL https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master/install.sh)
+   curl -sSL -o /tmp/install.sh https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master/install.sh && sudo bash /tmp/install.sh
    ```
 
 #### Opção B: Diretamente no Raspberry Pi
@@ -148,7 +159,7 @@ Pronto! Tudo será instalado e configurado automaticamente.
 
 2. **Execute o Script**
    ```bash
-   sudo bash <(curl -sSL https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master/install.sh)
+   curl -sSL -o /tmp/install.sh https://raw.githubusercontent.com/brendoncarvalho/dashboard-rpi-3/master/install.sh && sudo bash /tmp/install.sh
    ```
 
 ### Passo 4: Fornecer as URLs
